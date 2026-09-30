@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "@/lib/apiClient";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid, Legend, Cell } from "recharts";
-import { TrendingUp, Award, PieChart as PieIcon } from "lucide-react";
+import { TrendingUp, Award, PieChart as PieIcon, ShieldCheck } from "lucide-react";
 
 export default function Analytics() {
   const [data, setData] = useState(null);
@@ -77,6 +77,30 @@ export default function Analytics() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm" data-testid="proof-recap-card">
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+          <h2 className="font-heading font-bold text-slate-900 flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-sky-600"/>Rekap Bukti Absen per Kelas
+          </h2>
+          <span className="px-3 py-1 rounded-full bg-sky-50 text-sky-700 text-xs font-bold border border-sky-100">
+            Total {data.total_proofs ?? 0} bukti · auto-recycle 2 hari
+          </span>
+        </div>
+        {(!data.proof_by_kelas || data.proof_by_kelas.length === 0) ? (
+          <p className="text-sm text-slate-400 italic">Belum ada bukti foto presensi dalam 2 hari terakhir.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={Math.max(180, data.proof_by_kelas.length * 44)}>
+            <BarChart data={data.proof_by_kelas} layout="vertical" margin={{left: 20}}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0"/>
+              <XAxis type="number" tick={{fontSize:11}} allowDecimals={false}/>
+              <YAxis type="category" dataKey="kelas" tick={{fontSize:12}} width={90}/>
+              <Tooltip contentStyle={{borderRadius:12, border:"1px solid #E2E8F0"}}/>
+              <Bar dataKey="count" name="Jumlah bukti" fill="#0284C7" radius={[0,8,8,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </div>
   );

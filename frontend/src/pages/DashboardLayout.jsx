@@ -17,7 +17,7 @@ const MENU = [
   { to: "/analytics", label: "Analitik", icon: BarChart3, roles: ["kepsek","super_admin"] },
   { to: "/attendance", label: "Presensi QR", icon: QrCode, roles: "*" },
   { to: "/bukti-absen", label: "Bukti Absen", icon: ShieldCheck, roles: ["kepsek","guru","super_admin"] },
-  { to: "/kelas", label: "Kelas", icon: School, roles: ["super_admin","staff_tu","kepsek","guru"] },
+  { to: "/kelas", label: "Kelas", icon: School, roles: "*" },
   { to: "/calendar", label: "Kalender", icon: CalendarDays, roles: "*" },
   { to: "/schoolgram", label: "Schoolgram", icon: Camera, roles: "*" },
   { to: "/inventory", label: "Inventaris", icon: Boxes, roles: "*" },

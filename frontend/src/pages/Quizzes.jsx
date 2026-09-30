@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import api from "@/lib/apiClient";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
-import { BrainCircuit, Plus, X, Trash2, Pencil, CheckCircle2, Award, Users, ListChecks } from "lucide-react";
+import { BrainCircuit, Plus, X, Trash2, Pencil, CheckCircle2, Award, Users, ListChecks, BookMarked, Archive } from "lucide-react";
 
 export default function Quizzes() {
   const { user } = useAuth();
@@ -165,8 +165,30 @@ function QuizModal({ editing, kelasList, onClose, onDone }) {
   const [kelas, setKelas] = useState(editing?.kelas || "");
   const [qs, setQs] = useState(editing?.questions?.length ? editing.questions.map(q => ({ q: q.q, options: [...q.options], answer: q.answer ?? 0 })) : [{ q: "", options: ["", "", "", ""], answer: 0 }]);
   const [saving, setSaving] = useState(false);
+  const [showBank, setShowBank] = useState(false);
+  const [bank, setBank] = useState([]);
+
+  const loadBank = () => api.get("/question-bank").then(r => setBank(r.data)).catch(() => {});
+  useEffect(() => { loadBank(); }, []);
 
   const add = () => setQs([...qs, { q: "", options: ["", "", "", ""], answer: 0 }]);
+
+  const saveToBank = async (q) => {
+    if (!q.q.trim() || q.options.some(o => !o.trim())) { toast.error("Lengkapi soal & opsi dulu"); return; }
+    await api.post("/question-bank", { q: q.q, options: q.options, answer: q.answer });
+    toast.success("Soal disimpan ke Bank Soal"); loadBank();
+  };
+
+  const insertFromBank = (picked) => {
+    const clean = picked.map(b => ({ q: b.q, options: [...b.options], answer: b.answer }));
+    // replace empty first row if present
+    const base = (qs.length === 1 && !qs[0].q.trim()) ? [] : qs;
+    setQs([...base, ...clean]);
+    setShowBank(false);
+    toast.success(`${clean.length} soal ditambahkan dari Bank`);
+  };
+
+  const delBank = async (id) => { await api.delete(`/question-bank/${id}`); loadBank(); };
 
   const save = async () => {
     if (!title.trim()) { toast.error("Judul quiz wajib diisi"); return; }
@@ -197,13 +219,23 @@ function QuizModal({ editing, kelasList, onClose, onDone }) {
             <option value="">Semua Kelas</option>
             {kelasList.map(k => <option key={k.id} value={k.name}>{k.name}</option>)}
           </select>
+
+          <button data-testid="quiz-bank-open" onClick={() => setShowBank(true)}
+            className="w-full py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm font-semibold hover:bg-amber-100 flex items-center justify-center gap-2">
+            <Archive className="w-4 h-4" />Ambil dari Bank Soal ({bank.length})
+          </button>
+
           {qs.map((q, qi) => (
             <div key={qi} className="p-3 bg-slate-50 rounded-xl space-y-2 relative border border-slate-100">
-              {qs.length > 1 && (
-                <button onClick={() => setQs(qs.filter((_, i) => i !== qi))} className="absolute top-2 right-2 text-rose-500 hover:text-rose-700"><Trash2 className="w-4 h-4" /></button>
-              )}
+              <div className="absolute top-2 right-2 flex gap-1.5">
+                <button data-testid={`quiz-savebank-${qi}`} onClick={() => saveToBank(q)} title="Simpan ke Bank Soal"
+                  className="text-amber-500 hover:text-amber-700"><BookMarked className="w-4 h-4" /></button>
+                {qs.length > 1 && (
+                  <button onClick={() => setQs(qs.filter((_, i) => i !== qi))} className="text-rose-500 hover:text-rose-700"><Trash2 className="w-4 h-4" /></button>
+                )}
+              </div>
               <input data-testid={`quiz-q-input-${qi}`} placeholder={`Soal #${qi + 1}`} value={q.q}
-                onChange={e => { const c = [...qs]; c[qi].q = e.target.value; setQs(c); }} className="w-full px-3 py-2 border rounded-lg text-sm pr-8" />
+                onChange={e => { const c = [...qs]; c[qi].q = e.target.value; setQs(c); }} className="w-full px-3 py-2 border rounded-lg text-sm pr-16" />
               <p className="text-[10px] uppercase font-semibold text-slate-400">Pilih radio = jawaban benar</p>
               {q.options.map((o, oi) => (
                 <div key={oi} className="flex items-center gap-2">
@@ -218,6 +250,47 @@ function QuizModal({ editing, kelasList, onClose, onDone }) {
           <button onClick={add} className="w-full py-2 border-2 border-dashed border-slate-300 rounded-lg text-sm font-semibold text-slate-600 hover:border-sky-500 hover:text-sky-600">+ Tambah Soal</button>
           <button data-testid="quiz-save-button" onClick={save} disabled={saving}
             className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 disabled:opacity-60">{saving ? "Menyimpan…" : "Simpan Quiz"}</button>
+        </div>
+      </div>
+
+      {showBank && <BankPicker bank={bank} onInsert={insertFromBank} onDelete={delBank} onClose={() => setShowBank(false)} />}
+    </div>
+  );
+}
+
+function BankPicker({ bank, onInsert, onDelete, onClose }) {
+  const [sel, setSel] = useState([]);
+  const toggle = (id) => setSel(sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
+  return (
+    <div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()} data-testid="quiz-bank-modal">
+        <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
+          <h3 className="font-heading font-bold text-lg flex items-center gap-2"><Archive className="w-5 h-5 text-amber-500" />Bank Soal</h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-2">
+          {bank.length === 0 && <p className="text-sm text-slate-400 italic">Belum ada soal tersimpan. Klik ikon bookmark pada soal untuk menyimpannya ke sini.</p>}
+          {bank.map(b => (
+            <div key={b.id} data-testid={`bank-item-${b.id}`}
+              className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${sel.includes(b.id) ? "border-sky-500 bg-sky-50" : "border-slate-100 bg-slate-50 hover:border-slate-300"}`}
+              onClick={() => toggle(b.id)}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm text-slate-900">{b.q}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Jawaban: {b.options[b.answer]}</p>
+                </div>
+                <button data-testid={`bank-delete-${b.id}`} onClick={e => { e.stopPropagation(); onDelete(b.id); }}
+                  className="text-rose-400 hover:text-rose-600 shrink-0"><Trash2 className="w-4 h-4" /></button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 border-t sticky bottom-0 bg-white">
+          <button data-testid="quiz-bank-insert" disabled={sel.length === 0}
+            onClick={() => onInsert(bank.filter(b => sel.includes(b.id)))}
+            className="w-full py-2.5 bg-sky-600 text-white rounded-xl font-semibold hover:bg-sky-700 disabled:opacity-50">
+            Tambahkan {sel.length > 0 ? `${sel.length} soal` : "soal terpilih"}
+          </button>
         </div>
       </div>
     </div>

@@ -656,6 +656,7 @@ class KelasIn(BaseModel):
     name: str
     wali_kelas: Optional[str] = None
     subjects: List[str] = []
+    schedule: List[dict] = []  # [{day, time, subject, teacher}]
 
 @api.get("/kelas")
 async def list_kelas(user=Depends(get_current_user)):
@@ -681,6 +682,30 @@ async def update_kelas(kid: str, body: KelasIn, user=Depends(require_roles("supe
 @api.delete("/kelas/{kid}")
 async def delete_kelas(kid: str, user=Depends(require_roles("super_admin", "staff_tu", "kepsek"))):
     await db.kelas.delete_one({"id": kid})
+    return {"ok": True}
+
+# ---------------- BANK SOAL (Question Bank) ----------------
+class BankQuestionIn(BaseModel):
+    q: str
+    options: List[str]
+    answer: int
+    subject: Optional[str] = None
+
+@api.get("/question-bank")
+async def list_bank(user=Depends(require_roles("guru", "super_admin"))):
+    q = {} if user["role"] == "super_admin" else {"teacher_id": user["id"]}
+    return await db.question_bank.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+@api.post("/question-bank")
+async def add_bank(body: BankQuestionIn, user=Depends(require_roles("guru", "super_admin"))):
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(), "teacher_id": user["id"],
+           "teacher_name": user["name"], "created_at": now_iso()}
+    await db.question_bank.insert_one(doc); doc.pop("_id", None)
+    return doc
+
+@api.delete("/question-bank/{qid}")
+async def del_bank(qid: str, user=Depends(require_roles("guru", "super_admin"))):
+    await db.question_bank.delete_one({"id": qid})
     return {"ok": True}
 
 # ---------------- SCHOOLGRAM ----------------
@@ -953,7 +978,13 @@ async def analytics(user=Depends(require_roles("kepsek", "super_admin"))):
         k = p.get("kelas")
         if k: class_rank[k] = class_rank.get(k, 0) + 2
     ranking = sorted([{"kelas": k, "score": v} for k, v in class_rank.items()], key=lambda x: -x["score"])[:10]
-    return {"trend": trend, "quiz_distribution": buckets, "class_ranking": ranking}
+    # Rekap bukti absen anti-titip per kelas
+    proof_agg = await db.attendance_proofs.aggregate(
+        [{"$group": {"_id": "$kelas", "count": {"$sum": 1}}}, {"$sort": {"count": -1}}]).to_list(50)
+    proof_by_kelas = [{"kelas": (a["_id"] or "Tanpa Kelas"), "count": a["count"]} for a in proof_agg]
+    total_proofs = sum(p["count"] for p in proof_by_kelas)
+    return {"trend": trend, "quiz_distribution": buckets, "class_ranking": ranking,
+            "proof_by_kelas": proof_by_kelas, "total_proofs": total_proofs}
 
 # ---------------- PASSWORD RESET ----------------
 class ForgotIn(BaseModel):
