@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 8 verification: quiz access bug fix for all student roles, flashcard quiz UI, Kelas read-only for all students, Bukti Absen kelas/status filters. Backend: 21/21 pytest cases passed. Frontend Playwright: all 4 flows PASS (siswa flashcard end-to-end incl. prev/next & submit result, ketua_kelas Kelas read-only + Kelasku badge + schedule modal + quiz visibility, ketua_osis kelas+quizzes, kepsek Bukti Absen filters+reset+count).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "BuktiAbsen page", "issues": ["The three empty bukti cards render the photo area gray/blank because the seeded scan uses a 1x1 tiny base64 png — real photos will look fine, but placeholder currently gives an 'empty' impression. Consider a subtle skeleton or 'foto tidak tersedia' fallback text when image height < threshold."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter8_features.py",
+    "/app/test_reports/pytest/iter8.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1609 LOC — still overdue for router splitting (quizzes/kelas/attendance/analytics).",
+    "BuktiAbsen filter is client-side only (fetches full /api/attendance/proofs list, then filters in JS). Fine at current scale but if proof volume grows the server should accept date+kelas+status query params to reduce payload.",
+    "GET /api/kelas still does N+1 count_documents per class (student_count). Should aggregate.",
+    "list_quiz for STUDENT_ROLES performs one quiz_attempts.find_one per quiz per request — should be batched with $in query.",
+    "Quizzes.jsx FlashcardRunner: 'answered' counter and Kirim button gating rely on answers[i] !== undefined; if a student clicks the same option twice the state still counts once (OK), but back navigation preserves selection — good. No auto-save/persistence between refresh though — a mid-quiz refresh loses progress. Consider localStorage draft.",
+    "Kelas.jsx: 'Kelasku' badge match is by exact string user.kelas === k.name — safe, but if a class is renamed all matching siswa records stay stale (no migration). Acceptable, just noting.",
+    "bukti-clear-filter is conditionally rendered only when any filter is active; tests must set a filter first before locating it (not a bug, documenting for future testers)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter8_features.py",
+    "/app/test_reports/iteration_8.json"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Used credentials from /app/memory/test_credentials.md (super_admin, guru, siswa, ketua_kelas, ketua_osis, kepsek, tu).",
+  "seed_data_creation": "Created and deleted TEST_ITER8_Quiz + TEST_UI_Quiz_Iter8 (guru). Created one attendance proof by scanning siswa Rina with a 1x1 base64 png; will auto-recycle via TTL in 2 days.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 verified end-to-end. Selectors used: quizzes-page, quiz-take-<id>, quiz-retake-<id>, quiz-take-modal, quiz-opt-<current>-<oi>, quiz-prev, quiz-next, quiz-submit-answers, quiz-result-close; kelas-page, kelas-add-button, kelas-edit-<id>, kelas-delete-<id>, kelas-schedule-<id>, schedule-view-modal, plus 'Kelasku' text badge; bukti-absen-page, bukti-date-filter, bukti-kelas-filter, bukti-status-filter, bukti-clear-filter (conditional), bukti-count, bukti-grid. NOTE: bukti-clear-filter only renders when a filter is set. NOTE: dashboard route is '/' not '/dashboard' — login redirect lands on root; wait for 'Selamat datang' text instead of URL pattern. Test file: /app/backend/tests/test_iter8_features.py (21 cases). No defects found.",
+  "rca of the issue": "Original bug (quiz visible only to ketua_kelas) confirmed FIXED via STUDENT_ROLES = [siswa, ketua_kelas, ketua_osis]. GET /api/quizzes now returns all quizzes with 'answer' stripped for all three roles; POST /api/quizzes/attempt returns 200 for all three (previously 403 for ketua_kelas/ketua_osis). Verified via parametrized pytest cases (test_iter8_features.py::TestQuizAccessAllStudents) and via Playwright UI flow for siswa (full flashcard submit) plus quiz-take visibility for ketua_kelas and ketua_osis."
+}

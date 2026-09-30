@@ -86,8 +86,12 @@ export default function BuktiAbsen() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" data-testid="bukti-grid">
           {filtered.map(r => (
             <div key={r.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <button onClick={() => setPreview(r)} className="block w-full aspect-square bg-slate-100 overflow-hidden">
-                <img src={r.photo} alt={r.student_name} className="w-full h-full object-cover hover:scale-105 transition-transform" />
+              <button onClick={() => setPreview(r)} className="relative block w-full aspect-square bg-slate-100 overflow-hidden">
+                <span className="absolute inset-0 flex flex-col items-center justify-center text-slate-300 pointer-events-none">
+                  <Camera className="w-8 h-8" /><span className="text-[10px] mt-1">foto tidak tersedia</span>
+                </span>
+                <img src={r.photo} alt={r.student_name} className="relative w-full h-full object-cover hover:scale-105 transition-transform"
+                  onError={e => { e.currentTarget.style.display = "none"; }} />
               </button>
               <div className="p-3.5">
                 <div className="flex items-center justify-between gap-2">
