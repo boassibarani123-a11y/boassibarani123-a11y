@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import api from "@/lib/apiClient";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
-import { BrainCircuit, Plus, X, Trash2, Pencil, CheckCircle2, Award, Users, ListChecks, BookMarked, Archive } from "lucide-react";
+import { BrainCircuit, Plus, X, Trash2, Pencil, CheckCircle2, Award, Users, ListChecks, BookMarked, Archive, ChevronLeft, ChevronRight } from "lucide-react";
+
+const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
 export default function Quizzes() {
   const { user } = useAuth();
@@ -13,6 +16,7 @@ export default function Quizzes() {
   const [editing, setEditing] = useState(null);
   const [taking, setTaking] = useState(null);
   const [answers, setAnswers] = useState([]);
+  const [current, setCurrent] = useState(0);
   const [result, setResult] = useState(null);
 
   const load = () => api.get("/quizzes").then(r => setList(r.data));
@@ -27,8 +31,15 @@ export default function Quizzes() {
     toast.success("Quiz dihapus"); load();
   };
 
+  const startQuiz = (q) => {
+    setResult(null);
+    setTaking(q);
+    setAnswers(Array(q.questions.length).fill(-1));
+    setCurrent(0);
+  };
+
   const submit = async () => {
-    if (answers.some(a => a === -1)) { toast.error("Jawab semua soal dulu ya"); return; }
+    if (answers.some(a => a === -1)) { toast.error("Masih ada soal yang belum dijawab"); return; }
     const r = await api.post("/quizzes/attempt", { quiz_id: taking.id, answers });
     setResult(r.data);
     toast.success(`Skor: ${r.data.score}/${r.data.total} (${r.data.percent.toFixed(0)}%)`);
@@ -42,7 +53,7 @@ export default function Quizzes() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="font-heading text-3xl font-extrabold text-slate-900">Mini-Quiz Harian</h1>
-          <p className="mt-1 text-sm text-slate-500">Kuis singkat interaktif dengan penilaian otomatis</p>
+          <p className="mt-1 text-sm text-slate-500">Kuis flashcard interaktif dengan penilaian otomatis</p>
         </div>
         {isTeacher && (
           <button data-testid="quiz-new-button" onClick={() => { setEditing(null); setShowForm(true); }}
@@ -55,7 +66,7 @@ export default function Quizzes() {
       {list.length === 0 && (
         <div className="text-center py-16 bg-white border border-dashed border-slate-200 rounded-2xl">
           <BrainCircuit className="w-10 h-10 text-slate-300 mx-auto" />
-          <p className="mt-3 text-slate-500">{isTeacher ? "Belum ada quiz. Buat quiz pertamamu!" : "Belum ada quiz untuk kelasmu."}</p>
+          <p className="mt-3 text-slate-500">{isTeacher ? "Belum ada quiz. Buat quiz pertamamu!" : "Belum ada quiz saat ini."}</p>
         </div>
       )}
 
@@ -97,11 +108,11 @@ export default function Quizzes() {
                       <span className="text-xs text-emerald-700 flex items-center gap-1"><Award className="w-4 h-4" />Skor kamu</span>
                       <span className="font-heading font-extrabold text-emerald-700">{q.my_attempt.score}/{q.my_attempt.total} · {q.my_attempt.percent.toFixed(0)}%</span>
                     </div>
-                    <button data-testid={`quiz-retake-${q.id}`} onClick={() => { setResult(null); setTaking(q); setAnswers(Array(q.questions.length).fill(-1)); }}
+                    <button data-testid={`quiz-retake-${q.id}`} onClick={() => startQuiz(q)}
                       className="w-full py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold hover:bg-slate-200">Kerjakan Ulang</button>
                   </div>
                 ) : (
-                  <button data-testid={`quiz-take-${q.id}`} onClick={() => { setResult(null); setTaking(q); setAnswers(Array(q.questions.length).fill(-1)); }}
+                  <button data-testid={`quiz-take-${q.id}`} onClick={() => startQuiz(q)}
                     className="w-full py-2.5 bg-slate-900 text-white rounded-lg text-sm font-semibold hover:bg-slate-800">Kerjakan Sekarang</button>
                 )}
               </div>
@@ -117,45 +128,109 @@ export default function Quizzes() {
       )}
 
       {taking && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full max-h-[88vh] overflow-y-auto shadow-2xl" data-testid="quiz-take-modal">
-            <div className="flex items-center justify-between p-5 border-b sticky top-0 bg-white">
-              <h3 className="font-heading font-bold">{taking.title}</h3>
-              <button onClick={closeTaking} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
+        <FlashcardRunner
+          quiz={taking} answers={answers} setAnswers={setAnswers}
+          current={current} setCurrent={setCurrent}
+          result={result} onSubmit={submit} onClose={closeTaking} />
+      )}
+    </div>
+  );
+}
+
+function FlashcardRunner({ quiz, answers, setAnswers, current, setCurrent, result, onSubmit, onClose }) {
+  const questions = quiz.questions || [];
+  const total = questions.length;
+  const q = questions[current];
+  const answered = answers.filter(a => a !== -1).length;
+  const isLast = current === total - 1;
+
+  const pick = (oi) => { const a = [...answers]; a[current] = oi; setAnswers(a); };
+  const next = () => setCurrent(Math.min(total - 1, current + 1));
+  const prev = () => setCurrent(Math.max(0, current - 1));
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-3xl max-w-xl w-full max-h-[92vh] overflow-hidden shadow-2xl flex flex-col" data-testid="quiz-take-modal">
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div className="min-w-0">
+            <h3 className="font-heading font-bold text-slate-900 truncate">{quiz.title}</h3>
+            {!result && <p className="text-xs text-slate-400">{quiz.kelas || "Semua Kelas"}</p>}
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+
+        {result ? (
+          <div className="p-8 text-center space-y-4">
+            <motion.div initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: "spring", stiffness: 200 }}
+              className="w-24 h-24 rounded-full bg-gradient-to-br from-emerald-500 to-sky-600 text-white flex items-center justify-center mx-auto shadow-xl">
+              <Award className="w-12 h-12" />
+            </motion.div>
+            <div>
+              <p className="font-heading text-5xl font-extrabold text-slate-900">{result.percent.toFixed(0)}%</p>
+              <p className="text-slate-500 mt-1">Kamu menjawab benar {result.score} dari {result.total} soal</p>
+              <p className="mt-2 text-sm font-semibold text-sky-600">
+                {result.percent >= 80 ? "Luar biasa! 🎉" : result.percent >= 60 ? "Kerja bagus! 👍" : "Terus semangat belajar! 💪"}
+              </p>
+            </div>
+            <button data-testid="quiz-result-close" onClick={onClose} className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800">Selesai</button>
+          </div>
+        ) : (
+          <>
+            <div className="px-6 pt-5">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-500 mb-2">
+                <span>Soal {current + 1} dari {total}</span>
+                <span>{answered}/{total} terjawab</span>
+              </div>
+              <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                <motion.div className="h-full bg-gradient-to-r from-sky-500 to-sky-700 rounded-full"
+                  animate={{ width: `${((current + 1) / total) * 100}%` }} transition={{ duration: 0.3 }} />
+              </div>
             </div>
 
-            {result ? (
-              <div className="p-8 text-center space-y-4">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-500 to-sky-600 text-white flex items-center justify-center mx-auto shadow-xl">
-                  <Award className="w-10 h-10" />
-                </div>
-                <div>
-                  <p className="font-heading text-4xl font-extrabold text-slate-900">{result.percent.toFixed(0)}%</p>
-                  <p className="text-slate-500 mt-1">Kamu menjawab benar {result.score} dari {result.total} soal</p>
-                </div>
-                <button data-testid="quiz-result-close" onClick={closeTaking} className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800">Selesai</button>
-              </div>
-            ) : (
-              <div className="p-5 space-y-4">
-                {taking.questions.map((q, i) => (
-                  <div key={i} className="p-4 bg-slate-50 rounded-xl">
-                    <p className="font-semibold text-sm mb-2">{i + 1}. {q.q}</p>
-                    <div className="space-y-1.5">
-                      {q.options.map((o, oi) => (
-                        <label key={oi} data-testid={`quiz-opt-${i}-${oi}`}
-                          className={`flex items-center gap-2 text-sm p-2.5 rounded-lg cursor-pointer border-2 transition-all ${answers[i] === oi ? "border-sky-500 bg-white" : "border-transparent hover:bg-white"}`}>
-                          <input type="radio" checked={answers[i] === oi} onChange={() => { const a = [...answers]; a[i] = oi; setAnswers(a); }} />{o}
-                        </label>
-                      ))}
-                    </div>
+            <div className="p-6 flex-1 overflow-y-auto">
+              <AnimatePresence mode="wait">
+                <motion.div key={current}
+                  initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -60 }}
+                  transition={{ duration: 0.25 }}>
+                  <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-700 text-white p-6 shadow-lg mb-5">
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-sky-300">Pertanyaan {current + 1}</span>
+                    <p className="mt-2 font-heading text-xl font-bold leading-snug">{q.q}</p>
                   </div>
-                ))}
-                <button data-testid="quiz-submit-answers" onClick={submit} className="w-full py-2.5 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800">Kirim Jawaban</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+                  <div className="space-y-2.5">
+                    {q.options.map((o, oi) => {
+                      const selected = answers[current] === oi;
+                      return (
+                        <button key={oi} data-testid={`quiz-opt-${current}-${oi}`} onClick={() => pick(oi)}
+                          className={`w-full flex items-center gap-3 p-4 rounded-xl border-2 text-left transition-all ${selected ? "border-sky-500 bg-sky-50 shadow-md" : "border-slate-200 hover:border-sky-300 hover:bg-slate-50"}`}>
+                          <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm shrink-0 ${selected ? "bg-sky-600 text-white" : "bg-slate-100 text-slate-500"}`}>{LETTERS[oi]}</span>
+                          <span className="text-sm font-medium text-slate-800">{o || <span className="italic text-slate-400">(opsi kosong)</span>}</span>
+                          {selected && <CheckCircle2 className="w-5 h-5 text-sky-600 ml-auto shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            <div className="px-6 py-4 border-t flex items-center gap-3">
+              <button data-testid="quiz-prev" onClick={prev} disabled={current === 0}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold hover:bg-slate-200 disabled:opacity-40 flex items-center gap-1">
+                <ChevronLeft className="w-4 h-4" />Sebelumnya
+              </button>
+              {isLast ? (
+                <button data-testid="quiz-submit-answers" onClick={onSubmit}
+                  className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700">Kirim Jawaban</button>
+              ) : (
+                <button data-testid="quiz-next" onClick={next}
+                  className="flex-1 py-2.5 bg-slate-900 text-white rounded-xl font-semibold hover:bg-slate-800 flex items-center justify-center gap-1">
+                  Selanjutnya<ChevronRight className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -181,7 +256,6 @@ function QuizModal({ editing, kelasList, onClose, onDone }) {
 
   const insertFromBank = (picked) => {
     const clean = picked.map(b => ({ q: b.q, options: [...b.options], answer: b.answer }));
-    // replace empty first row if present
     const base = (qs.length === 1 && !qs[0].q.trim()) ? [] : qs;
     setQs([...base, ...clean]);
     setShowBank(false);
@@ -262,7 +336,8 @@ function BankPicker({ bank, onInsert, onDelete, onClose }) {
   const [sel, setSel] = useState([]);
   const toggle = (id) => setSel(sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]);
   return (
-    <div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center z-[60] p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-slate-900/70 flex items-center justify-center z-[60] p-4"
+      onClick={() => { if (sel.length === 0) onClose(); }}>
       <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()} data-testid="quiz-bank-modal">
         <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
           <h3 className="font-heading font-bold text-lg flex items-center gap-2"><Archive className="w-5 h-5 text-amber-500" />Bank Soal</h3>

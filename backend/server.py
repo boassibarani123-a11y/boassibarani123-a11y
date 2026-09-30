@@ -231,6 +231,7 @@ app.add_middleware(
 
 # ---------------- ROLES ----------------
 ROLES = ["super_admin", "kepsek", "staff_tu", "guru", "siswa", "ketua_osis", "ketua_kelas", "orang_tua"]
+STUDENT_ROLES = ["siswa", "ketua_kelas", "ketua_osis"]  # semua peran siswa yang boleh mengerjakan quiz
 
 # ---------------- UTIL ----------------
 def now_iso():
@@ -599,11 +600,9 @@ class QuizAttemptIn(BaseModel):
 
 @api.get("/quizzes")
 async def list_quiz(user=Depends(get_current_user)):
-    if user["role"] == "siswa":
-        uk = user.get("kelas")
-        quizzes = await db.quizzes.find(
-            {"$or": [{"kelas": uk}, {"kelas": {"$in": ["", "Semua", "semua", "all", "Semua Kelas"]}}, {"kelas": None}]},
-            {"_id": 0}).sort("created_at", -1).to_list(500)
+    if user["role"] in STUDENT_ROLES:
+        # Semua siswa (termasuk ketua kelas/osis) dapat melihat & mengerjakan semua quiz harian
+        quizzes = await db.quizzes.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
         for qz in quizzes:
             for question in qz.get("questions", []):
                 question.pop("answer", None)
@@ -635,7 +634,7 @@ async def delete_quiz(qid: str, user=Depends(require_roles("guru", "super_admin"
     return {"ok": True}
 
 @api.post("/quizzes/attempt")
-async def attempt_quiz(body: QuizAttemptIn, user=Depends(require_roles("siswa"))):
+async def attempt_quiz(body: QuizAttemptIn, user=Depends(require_roles(*STUDENT_ROLES))):
     quiz = await db.quizzes.find_one({"id": body.quiz_id})
     if not quiz: raise HTTPException(404, "Quiz tidak ditemukan")
     questions = quiz.get("questions", [])

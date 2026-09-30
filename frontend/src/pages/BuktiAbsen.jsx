@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import api from "@/lib/apiClient";
-import { ShieldCheck, RefreshCw, CalendarDays, Camera, Info } from "lucide-react";
+import { ShieldCheck, RefreshCw, CalendarDays, Camera, Info, Filter } from "lucide-react";
 
 const STATUS_STYLE = {
   hadir: "bg-emerald-100 text-emerald-700",
@@ -8,10 +8,14 @@ const STATUS_STYLE = {
   sakit: "bg-amber-100 text-amber-700",
   alpa: "bg-rose-100 text-rose-700",
 };
+const STATUSES = ["hadir", "izin", "sakit", "alpa"];
 
 export default function BuktiAbsen() {
   const [rows, setRows] = useState([]);
+  const [kelasList, setKelasList] = useState([]);
   const [date, setDate] = useState("");
+  const [kelasFilter, setKelasFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [preview, setPreview] = useState(null);
 
@@ -22,6 +26,14 @@ export default function BuktiAbsen() {
       .finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [date]);
+  useEffect(() => { api.get("/kelas").then(r => setKelasList(r.data)).catch(() => {}); }, []);
+
+  const filtered = useMemo(() => rows.filter(r =>
+    (!kelasFilter || r.kelas === kelasFilter) &&
+    (!statusFilter || r.status === statusFilter)
+  ), [rows, kelasFilter, statusFilter]);
+
+  const selectCls = "px-3 py-2.5 border-2 border-slate-200 rounded-xl focus:border-sky-500 outline-none text-sm bg-white";
 
   return (
     <div className="space-y-6" data-testid="bukti-absen-page">
@@ -32,15 +44,30 @@ export default function BuktiAbsen() {
           </h1>
           <p className="mt-1 text-sm text-slate-500">Foto otomatis tertangkap saat siswa scan QR — anti-titip absen.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <CalendarDays className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input data-testid="bukti-date-filter" type="date" value={date} onChange={e => setDate(e.target.value)}
-              className="pl-9 pr-3 py-2.5 border-2 border-slate-200 rounded-xl focus:border-sky-500 outline-none text-sm" />
-          </div>
-          <button data-testid="bukti-refresh" onClick={load}
-            className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800"><RefreshCw className="w-4 h-4" /></button>
+        <button data-testid="bukti-refresh" onClick={load}
+          className="p-2.5 bg-slate-900 text-white rounded-xl hover:bg-slate-800"><RefreshCw className="w-4 h-4" /></button>
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap p-4 bg-white border border-slate-200 rounded-2xl shadow-sm">
+        <span className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400"><Filter className="w-4 h-4" />Filter</span>
+        <div className="relative">
+          <CalendarDays className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input data-testid="bukti-date-filter" type="date" value={date} onChange={e => setDate(e.target.value)}
+            className="pl-9 pr-3 py-2.5 border-2 border-slate-200 rounded-xl focus:border-sky-500 outline-none text-sm" />
         </div>
+        <select data-testid="bukti-kelas-filter" value={kelasFilter} onChange={e => setKelasFilter(e.target.value)} className={selectCls}>
+          <option value="">Semua Kelas</option>
+          {kelasList.map(k => <option key={k.id} value={k.name}>{k.name}</option>)}
+        </select>
+        <select data-testid="bukti-status-filter" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={selectCls}>
+          <option value="">Semua Status</option>
+          {STATUSES.map(s => <option key={s} value={s}>{s.toUpperCase()}</option>)}
+        </select>
+        {(kelasFilter || statusFilter || date) && (
+          <button data-testid="bukti-clear-filter" onClick={() => { setKelasFilter(""); setStatusFilter(""); setDate(""); }}
+            className="text-xs font-semibold text-rose-500 hover:text-rose-700">Reset</button>
+        )}
+        <span className="ml-auto text-xs font-semibold text-slate-500" data-testid="bukti-count">{filtered.length} bukti</span>
       </div>
 
       <div className="flex items-start gap-2 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
@@ -50,14 +77,14 @@ export default function BuktiAbsen() {
 
       {loading ? (
         <p className="text-slate-400 italic">Memuat bukti absen…</p>
-      ) : rows.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="text-center py-16 bg-white border border-dashed border-slate-200 rounded-2xl">
           <Camera className="w-10 h-10 text-slate-300 mx-auto" />
-          <p className="mt-3 text-slate-500">Belum ada bukti foto untuk tanggal ini.</p>
+          <p className="mt-3 text-slate-500">Tidak ada bukti foto untuk filter ini.</p>
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" data-testid="bukti-grid">
-          {rows.map(r => (
+          {filtered.map(r => (
             <div key={r.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
               <button onClick={() => setPreview(r)} className="block w-full aspect-square bg-slate-100 overflow-hidden">
                 <img src={r.photo} alt={r.student_name} className="w-full h-full object-cover hover:scale-105 transition-transform" />
