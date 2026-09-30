@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 7 verification: siswa read-only Kelas + 'Kelasku' highlight, weekly schedule editor & persistence, Analytics 'Rekap Bukti Absen per Kelas', Bank Soal save/reuse/delete, RBAC. Backend: 14/14 pytest cases passed. Frontend: all Playwright flows PASS (siswa /kelas, schedule modal, admin add/save/verify schedule row, quiz bank save/insert/delete, quiz create-with-bank).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter7_features.py",
+    "/app/test_reports/pytest/iter7.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py grew to 1607 LOC – overdue for splitting into per-domain routers (kelas, quizzes, bank, analytics, attendance).",
+    "GET /api/kelas: student_count is computed per-row via count_documents in a Python loop (N+1). Would be better as a single aggregation pipeline once class list grows.",
+    "Kelas seed only runs when count==0 at startup. During my session the kelas collection was empty (found 0 rows via API) requiring a backend restart to re-seed. Consider adding an idempotent 'ensure default kelas exist' step that inserts missing names rather than depending on empty-collection detection – otherwise once someone deletes a class the whole class list can stay empty until restart.",
+    "KelasIn.schedule is List[dict] with no Pydantic model – no server-side validation for 'day/time/subject/teacher' shape. A ScheduleItem model with day enum + time regex would prevent malformed rows.",
+    "BankQuestionIn.answer has no bounds check against len(options); an out-of-range value would be silently stored.",
+    "Analytics.jsx: hard-coded 'auto-recycle 2 hari' text next to Total badge assumes TTL=48h. If backend TTL changes this label will lie. Consider surfacing TTL from backend.",
+    "Quizzes.jsx BankPicker: clicking outside the modal calls onClose immediately even when items are selected — a user can lose selections accidentally. Consider confirming or ignoring backdrop click when sel.length > 0."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter7_features.py", "/app/test_reports/iteration_7.json"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Used credentials from /app/memory/test_credentials.md (super_admin, guru, siswa, kepsek, tu).",
+  "seed_data_creation": "During testing I created (and cleaned up) a schedule row on kelas 'X IPA 2', a bank question and a TEST_QuizBankSoal quiz. All removed via API at the end. Also had to restart backend once to re-seed kelas (see code review note).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 7 features (siswa Kelas read-only, Kelas weekly schedule, Analytics Rekap Bukti Absen per Kelas, Quiz Bank Soal + RBAC) all verified end-to-end. Test file: /app/backend/tests/test_iter7_features.py (14 pytest cases, all pass). Frontend selectors used: kelas-page, kelas-card-<id>, kelas-add-button, kelas-edit-<id>, kelas-delete-<id>, kelas-schedule-<id>, kelas-form-modal, kelas-schedule-add-row, kelas-schedule-row-<i>, kelas-save-button, schedule-view-modal, proof-recap-card, quiz-new-button, quiz-form-modal, quiz-q-input-<i>, quiz-savebank-<i>, quiz-bank-open, quiz-bank-modal, bank-item-<id>, bank-delete-<id>, quiz-bank-insert, quiz-title-input, quiz-save-button. NOTE: default kelas seeding is not idempotent — if the collection is emptied for any reason (test teardown, manual delete) the app shows 'Belum ada kelas' until backend restarts; consider fixing to re-seed missing names.",
+  "rca of the issue": "N/A — no defects. Only one operational quirk: default kelas re-seed only fires when count==0 at startup, which caused an intermittent 'Belum ada kelas' state during testing that was resolved by 'sudo supervisorctl restart backend'."
+}

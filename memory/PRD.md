@@ -82,3 +82,12 @@ See `/app/memory/test_credentials.md`
   - Refactor: attendance/export, social-fund/export dengan format baru
   - Endpoint baru: /api/kas/export, /api/inventory/export, /api/users/export, /api/ppdb/export/xlsx
   - Tombol Export Excel di halaman Uang Kas, Inventaris, Admin PPDB
+
+## Update (Jun 2026 - Import GitHub + Phase 6)
+- Imported dari GitHub `boassibarani123-a11y/Website-Sekolah` (branch main). Fixed bug: seed admin/demo adalah dead code setelah `return` → dipindah ke `_seed_data()` yang dipanggil di startup.
+- [x] Bukti Absen anti-titip: foto webcam auto-capture saat scan QR (`captureSnapshot` dari #qr-reader video), disimpan di koleksi `attendance_proofs` dengan TTL index `expireAfterSeconds=172800` (auto-recycle 2 hari). Halaman `/bukti-absen` (RBAC: kepsek/guru/super_admin). Endpoint: GET /api/attendance/proofs.
+- [x] Inventaris: stok berkurang saat peminjaman Disetujui & bertambah saat Dikembalikan (flag `stock_applied`, idempoten, validasi stok cukup). PATCH /api/borrow/{id}.
+- [x] Manajemen Kelas (`/kelas`): CRUD kelas + kelola mapel + wali kelas + Jadwal Pelajaran mingguan (schedule: day/time/subject/teacher). Read-only untuk siswa (nav roles `*`), highlight "Kelasku". Endpoints: /api/kelas GET/POST/PATCH/DELETE.
+- [x] Mini-Quiz: PUT & DELETE /api/quizzes/{id}; siswa melihat quiz kelasnya + "Semua Kelas"; my_attempt badge & skor; UI kerjakan dengan layar hasil.
+- [x] Bank Soal Quiz: /api/question-bank GET/POST/DELETE (RBAC guru/super_admin, guru scoped ke miliknya, validasi answer index). Simpan soal ke bank & reuse via BankPicker.
+- [x] Analitik Kepsek: kartu "Rekap Bukti Absen per Kelas" (proof_by_kelas + total_proofs) bar chart horizontal.

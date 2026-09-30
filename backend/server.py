@@ -698,6 +698,8 @@ async def list_bank(user=Depends(require_roles("guru", "super_admin"))):
 
 @api.post("/question-bank")
 async def add_bank(body: BankQuestionIn, user=Depends(require_roles("guru", "super_admin"))):
+    if not (0 <= body.answer < len(body.options)):
+        raise HTTPException(400, "Indeks jawaban di luar jangkauan opsi")
     doc = {"id": str(uuid.uuid4()), **body.model_dump(), "teacher_id": user["id"],
            "teacher_name": user["name"], "created_at": now_iso()}
     await db.question_bank.insert_one(doc); doc.pop("_id", None)
