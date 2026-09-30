@@ -3,7 +3,8 @@ import { useAuth } from "@/context/AuthContext";
 import { useSettings } from "@/context/SettingsContext";
 import { GraduationCap, LayoutDashboard, UsersRound, QrCode, Boxes, ClipboardList,
   BrainCircuit, Camera, PiggyBank, HandCoins, Vote, Trophy, Megaphone, MessageSquareWarning,
-  LogOut, ChevronDown, BarChart3, FileText, MessageSquare, CalendarDays, UserPlus2, Settings as SettingsIcon, IdCard } from "lucide-react";
+  LogOut, ChevronDown, BarChart3, FileText, MessageSquare, CalendarDays, UserPlus2, Settings as SettingsIcon, IdCard,
+  School, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import NotificationBell from "@/components/NotificationBell";
 
@@ -15,6 +16,8 @@ const MENU = [
   { to: "/admin-ppdb", label: "Admin PPDB", icon: UserPlus2, roles: ["super_admin","kepsek","staff_tu"] },
   { to: "/analytics", label: "Analitik", icon: BarChart3, roles: ["kepsek","super_admin"] },
   { to: "/attendance", label: "Presensi QR", icon: QrCode, roles: "*" },
+  { to: "/bukti-absen", label: "Bukti Absen", icon: ShieldCheck, roles: ["kepsek","guru","super_admin"] },
+  { to: "/kelas", label: "Kelas", icon: School, roles: ["super_admin","staff_tu","kepsek","guru"] },
   { to: "/calendar", label: "Kalender", icon: CalendarDays, roles: "*" },
   { to: "/schoolgram", label: "Schoolgram", icon: Camera, roles: "*" },
   { to: "/inventory", label: "Inventaris", icon: Boxes, roles: "*" },

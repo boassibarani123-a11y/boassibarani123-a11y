@@ -28,6 +28,8 @@ import PpdbPublic from "@/pages/PpdbPublic";
 import AdminPpdb from "@/pages/AdminPpdb";
 import SettingsPage from "@/pages/SettingsPage";
 import MyCard from "@/pages/MyCard";
+import Kelas from "@/pages/Kelas";
+import BuktiAbsen from "@/pages/BuktiAbsen";
 import "@/index.css";
 
 function Protected({ children }) {
@@ -51,6 +53,8 @@ function AppInner() {
           <Route path="accounts" element={<MasterAccounts/>}/>
           <Route path="analytics" element={<Analytics/>}/>
           <Route path="attendance" element={<Attendance/>}/>
+          <Route path="bukti-absen" element={<BuktiAbsen/>}/>
+          <Route path="kelas" element={<Kelas/>}/>
           <Route path="schoolgram" element={<Schoolgram/>}/>
           <Route path="inventory" element={<Inventory/>}/>
           <Route path="assignments" element={<Assignments/>}/>

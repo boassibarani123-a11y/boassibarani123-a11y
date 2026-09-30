@@ -17,10 +17,21 @@ export default function Attendance() {
   };
   useEffect(() => { load(); }, []);
 
-  const submit = async (qr) => {
+  const captureSnapshot = () => {
     try {
-      const r = await api.post("/attendance/scan", { qr_code: qr, status });
-      toast.success(`${r.data.student.name} - ${status.toUpperCase()}`);
+      const video = document.querySelector("#qr-reader video");
+      if (!video || !video.videoWidth) return null;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.5);
+    } catch { return null; }
+  };
+
+  const submit = async (qr, photo = null) => {
+    try {
+      const r = await api.post("/attendance/scan", { qr_code: qr, status, photo });
+      toast.success(`${r.data.student.name} - ${status.toUpperCase()}${photo ? " · 📸 bukti tersimpan" : ""}`);
       load();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Gagal absen");
@@ -34,7 +45,7 @@ export default function Attendance() {
     scannerRef.current = cam;
     try {
       await cam.start({facingMode:"environment"}, {fps:10, qrbox:{width:250,height:250}},
-        async (txt) => { await submit(txt); }, () => {});
+        async (txt) => { const snap = captureSnapshot(); await submit(txt, snap); }, () => {});
     } catch (e) { toast.error("Kamera tidak tersedia"); setScanning(false); }
   };
   const stopCam = async () => {

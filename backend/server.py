@@ -394,17 +394,34 @@ async def scan(body: ScanIn, user=Depends(require_roles("staff_tu", "guru", "sup
     if not student:
         raise HTTPException(404, "QR tidak dikenali")
     today = datetime.now(timezone.utc).date().isoformat()
+    # Anti-titip: simpan bukti foto ke koleksi TTL (auto-recycle 2 hari) agar tidak membebani server
+    if body.photo:
+        await db.attendance_proofs.insert_one({
+            "id": str(uuid.uuid4()), "student_id": student["id"], "student_name": student["name"],
+            "kelas": student.get("kelas"), "status": body.status, "photo": body.photo,
+            "scanned_by": user["name"], "date": today, "captured_at": datetime.now(timezone.utc)})
     existing = await db.attendance.find_one({"student_id": student["id"], "date": today})
     if existing:
-        upd = {"status": body.status, "scanned_at": now_iso()}
-        if body.photo: upd["photo"] = body.photo
-        await db.attendance.update_one({"id": existing["id"]}, {"$set": upd})
+        await db.attendance.update_one({"id": existing["id"]}, {"$set": {
+            "status": body.status, "scanned_at": now_iso(),
+            "has_proof": bool(body.photo) or existing.get("has_proof", False)}})
         return {"ok": True, "student": strip(student), "status": body.status, "updated": True}
     rec = {"id": str(uuid.uuid4()), "student_id": student["id"], "student_name": student["name"],
            "kelas": student.get("kelas"), "date": today, "status": body.status, "scanned_at": now_iso(),
-           "scanned_by": user["name"], "photo": body.photo}
+           "scanned_by": user["name"], "has_proof": bool(body.photo)}
     await db.attendance.insert_one(rec)
     return {"ok": True, "student": strip(student), "status": body.status}
+
+@api.get("/attendance/proofs")
+async def list_proofs(date: Optional[str] = None, user=Depends(require_roles("kepsek", "guru", "super_admin"))):
+    """Bukti Absen anti-titip. Hanya kepsek, guru, super_admin. Foto auto-hapus setelah 2 hari (TTL)."""
+    q = {}
+    if date: q["date"] = date
+    rows = await db.attendance_proofs.find(q, {"_id": 0}).sort("captured_at", -1).to_list(1000)
+    for r in rows:
+        if isinstance(r.get("captured_at"), datetime):
+            r["captured_at"] = r["captured_at"].isoformat()
+    return rows
 
 @api.get("/attendance")
 async def list_attendance(date: Optional[str] = None, kelas: Optional[str] = None, user=Depends(get_current_user)):
@@ -493,9 +510,25 @@ async def list_borrow(mine: bool = False, user=Depends(get_current_user)):
 async def update_borrow(bid: str, status: str, user=Depends(require_roles("staff_tu", "super_admin"))):
     if status not in ["Disetujui", "Ditolak", "Dikembalikan"]:
         raise HTTPException(400, "Status tidak valid")
-    await db.borrow_requests.update_one({"id": bid}, {"$set": {"status": status, "updated_at": now_iso(),
-                                                                 "approved_by": user["name"]}})
     br = await db.borrow_requests.find_one({"id": bid})
+    if not br: raise HTTPException(404, "Permintaan tidak ditemukan")
+    applied = br.get("stock_applied", False)
+    qty = br.get("quantity", 0)
+    # Saat disetujui: kurangi stok inventaris (sekali saja)
+    if status == "Disetujui" and not applied:
+        item = await db.inventory.find_one({"id": br["item_id"]})
+        if not item: raise HTTPException(404, "Item tidak ditemukan")
+        if item.get("stock", 0) < qty:
+            raise HTTPException(400, f"Stok tidak cukup. Tersisa {item.get('stock', 0)}")
+        await db.inventory.update_one({"id": br["item_id"]}, {"$inc": {"stock": -qty}})
+        applied = True
+    # Saat dikembalikan: tambah stok kembali (jika sebelumnya dikurangi)
+    elif status == "Dikembalikan" and applied:
+        await db.inventory.update_one({"id": br["item_id"]}, {"$inc": {"stock": qty}})
+        applied = False
+    await db.borrow_requests.update_one({"id": bid}, {"$set": {"status": status, "updated_at": now_iso(),
+                                                                 "approved_by": user["name"],
+                                                                 "stock_applied": applied}})
     if br and br.get("requester_id"):
         await notify([br["requester_id"]],
                      f"Peminjaman: {status}",
@@ -566,12 +599,20 @@ class QuizAttemptIn(BaseModel):
 
 @api.get("/quizzes")
 async def list_quiz(user=Depends(get_current_user)):
-    q = {"kelas": user.get("kelas")} if user["role"] == "siswa" else {}
-    quizzes = await db.quizzes.find(q, {"_id": 0}).to_list(500)
     if user["role"] == "siswa":
+        uk = user.get("kelas")
+        quizzes = await db.quizzes.find(
+            {"$or": [{"kelas": uk}, {"kelas": {"$in": ["", "Semua", "semua", "all", "Semua Kelas"]}}, {"kelas": None}]},
+            {"_id": 0}).sort("created_at", -1).to_list(500)
         for qz in quizzes:
             for question in qz.get("questions", []):
                 question.pop("answer", None)
+            att = await db.quiz_attempts.find_one({"quiz_id": qz["id"], "student_id": user["id"]}, {"_id": 0})
+            qz["my_attempt"] = {"score": att["score"], "total": att["total"], "percent": att["percent"]} if att else None
+        return quizzes
+    quizzes = await db.quizzes.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    for qz in quizzes:
+        qz["attempt_count"] = await db.quiz_attempts.count_documents({"quiz_id": qz["id"]})
     return quizzes
 
 @api.post("/quizzes")
@@ -580,6 +621,18 @@ async def create_quiz(body: QuizIn, user=Depends(require_roles("guru", "super_ad
            "teacher_name": user["name"], "created_at": now_iso()}
     await db.quizzes.insert_one(doc); doc.pop("_id", None)
     return doc
+
+@api.put("/quizzes/{qid}")
+async def update_quiz(qid: str, body: QuizIn, user=Depends(require_roles("guru", "super_admin"))):
+    res = await db.quizzes.update_one({"id": qid}, {"$set": body.model_dump()})
+    if res.matched_count == 0: raise HTTPException(404, "Quiz tidak ditemukan")
+    return await db.quizzes.find_one({"id": qid}, {"_id": 0})
+
+@api.delete("/quizzes/{qid}")
+async def delete_quiz(qid: str, user=Depends(require_roles("guru", "super_admin"))):
+    await db.quizzes.delete_one({"id": qid})
+    await db.quiz_attempts.delete_many({"quiz_id": qid})
+    return {"ok": True}
 
 @api.post("/quizzes/attempt")
 async def attempt_quiz(body: QuizAttemptIn, user=Depends(require_roles("siswa"))):
@@ -597,6 +650,38 @@ async def attempt_quiz(body: QuizAttemptIn, user=Depends(require_roles("siswa"))
            "submitted_at": now_iso()}
     await db.quiz_attempts.replace_one({"quiz_id": body.quiz_id, "student_id": user["id"]}, doc, upsert=True)
     return {"score": score, "total": total, "percent": percent}
+
+# ---------------- KELAS (Class & Subjects Management) ----------------
+class KelasIn(BaseModel):
+    name: str
+    wali_kelas: Optional[str] = None
+    subjects: List[str] = []
+
+@api.get("/kelas")
+async def list_kelas(user=Depends(get_current_user)):
+    rows = await db.kelas.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    for k in rows:
+        k["student_count"] = await db.users.count_documents({"role": "siswa", "kelas": k["name"]})
+    return rows
+
+@api.post("/kelas")
+async def create_kelas(body: KelasIn, user=Depends(require_roles("super_admin", "staff_tu", "kepsek"))):
+    if await db.kelas.find_one({"name": body.name}):
+        raise HTTPException(400, "Kelas dengan nama ini sudah ada")
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(), "created_at": now_iso()}
+    await db.kelas.insert_one(doc); doc.pop("_id", None)
+    return doc
+
+@api.patch("/kelas/{kid}")
+async def update_kelas(kid: str, body: KelasIn, user=Depends(require_roles("super_admin", "staff_tu", "kepsek"))):
+    res = await db.kelas.update_one({"id": kid}, {"$set": body.model_dump()})
+    if res.matched_count == 0: raise HTTPException(404, "Kelas tidak ditemukan")
+    return await db.kelas.find_one({"id": kid}, {"_id": 0})
+
+@api.delete("/kelas/{kid}")
+async def delete_kelas(kid: str, user=Depends(require_roles("super_admin", "staff_tu", "kepsek"))):
+    await db.kelas.delete_one({"id": kid})
+    return {"ok": True}
 
 # ---------------- SCHOOLGRAM ----------------
 class PostIn(BaseModel):
@@ -1408,6 +1493,7 @@ async def startup():
     await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
     await db.password_reset_tokens.create_index("token_hash", unique=True)
     await db.password_reset_requests.create_index("created_at", expireAfterSeconds=900)
+    await db.attendance_proofs.create_index("captured_at", expireAfterSeconds=172800)  # auto-recycle bukti absen 2 hari
     await get_settings()  # ensure default settings row exists
     await _seed_data()
 
@@ -1475,6 +1561,13 @@ async def _seed_data():
                 await db.inventory.insert_one({"id": str(uuid.uuid4()), "name": item[0],
                                                 "category": item[1], "stock": item[2],
                                                 "condition": "Baik", "created_at": now_iso()})
+
+    # Seed default kelas + mata pelajaran
+    if await db.kelas.count_documents({}) == 0:
+        default_subjects = ["Matematika", "Bahasa Indonesia", "Bahasa Inggris", "Fisika", "Kimia", "Biologi", "Sejarah", "PJOK"]
+        for nm in ["X IPA 1", "X IPA 2", "XI IPA 1", "XI IPA 2", "XII IPA 1", "XII IPA 2"]:
+            await db.kelas.insert_one({"id": str(uuid.uuid4()), "name": nm, "wali_kelas": None,
+                                        "subjects": list(default_subjects), "created_at": now_iso()})
 
 app.include_router(api)
 
