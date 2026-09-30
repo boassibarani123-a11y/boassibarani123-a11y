@@ -549,8 +549,13 @@ class SubmissionIn(BaseModel):
     content: str
 
 @api.get("/assignments")
-async def list_assign(user=Depends(get_current_user)):
-    q = {"kelas": user.get("kelas")} if user["role"] == "siswa" else {}
+async def list_assign(kelas: Optional[str] = None, user=Depends(get_current_user)):
+    if user["role"] in STUDENT_ROLES:
+        q = {"kelas": user.get("kelas")}
+    elif kelas:
+        q = {"kelas": kelas}
+    else:
+        q = {}
     return await db.assignments.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 @api.post("/assignments")
@@ -561,7 +566,7 @@ async def create_assign(body: AssignmentIn, user=Depends(require_roles("guru", "
     return doc
 
 @api.post("/submissions")
-async def submit(body: SubmissionIn, user=Depends(require_roles("siswa"))):
+async def submit(body: SubmissionIn, user=Depends(require_roles(*STUDENT_ROLES))):
     existing = await db.submissions.find_one({"assignment_id": body.assignment_id, "student_id": user["id"]})
     if existing:
         await db.submissions.update_one({"id": existing["id"]}, {"$set": {"content": body.content, "submitted_at": now_iso()}})
@@ -575,7 +580,7 @@ async def submit(body: SubmissionIn, user=Depends(require_roles("siswa"))):
 async def list_subs(assignment_id: Optional[str] = None, user=Depends(get_current_user)):
     q = {}
     if assignment_id: q["assignment_id"] = assignment_id
-    if user["role"] == "siswa": q["student_id"] = user["id"]
+    if user["role"] in STUDENT_ROLES: q["student_id"] = user["id"]
     return await db.submissions.find(q, {"_id": 0}).to_list(1000)
 
 @api.patch("/submissions/{sid}/grade")
@@ -593,23 +598,28 @@ class QuizIn(BaseModel):
     title: str
     kelas: str
     questions: List[dict]  # [{q, options[], answer}]
+    time_limit: Optional[int] = None  # menit; None = tanpa batas waktu
 
 class QuizAttemptIn(BaseModel):
     quiz_id: str
     answers: List[int]
 
 @api.get("/quizzes")
-async def list_quiz(user=Depends(get_current_user)):
+async def list_quiz(kelas: Optional[str] = None, user=Depends(get_current_user)):
     if user["role"] in STUDENT_ROLES:
-        # Semua siswa (termasuk ketua kelas/osis) dapat melihat & mengerjakan semua quiz harian
-        quizzes = await db.quizzes.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+        # Quiz per-kelas: siswa hanya melihat quiz kelasnya sendiri + quiz "Semua Kelas"
+        uk = user.get("kelas")
+        quizzes = await db.quizzes.find(
+            {"$or": [{"kelas": uk}, {"kelas": {"$in": ["", "Semua", "semua", "all", "Semua Kelas"]}}, {"kelas": None}]},
+            {"_id": 0}).sort("created_at", -1).to_list(500)
         for qz in quizzes:
             for question in qz.get("questions", []):
                 question.pop("answer", None)
             att = await db.quiz_attempts.find_one({"quiz_id": qz["id"], "student_id": user["id"]}, {"_id": 0})
             qz["my_attempt"] = {"score": att["score"], "total": att["total"], "percent": att["percent"]} if att else None
         return quizzes
-    quizzes = await db.quizzes.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    q = {"kelas": kelas} if kelas else {}
+    quizzes = await db.quizzes.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     for qz in quizzes:
         qz["attempt_count"] = await db.quiz_attempts.count_documents({"quiz_id": qz["id"]})
     return quizzes
@@ -645,10 +655,16 @@ async def attempt_quiz(body: QuizAttemptIn, user=Depends(require_roles(*STUDENT_
     total = len(questions)
     percent = (score / total * 100) if total else 0
     doc = {"id": str(uuid.uuid4()), "quiz_id": body.quiz_id, "student_id": user["id"],
-           "student_name": user["name"], "score": score, "total": total, "percent": percent,
+           "student_name": user["name"], "kelas": user.get("kelas"), "score": score, "total": total, "percent": percent,
            "submitted_at": now_iso()}
     await db.quiz_attempts.replace_one({"quiz_id": body.quiz_id, "student_id": user["id"]}, doc, upsert=True)
     return {"score": score, "total": total, "percent": percent}
+
+@api.get("/quizzes/{qid}/leaderboard")
+async def quiz_leaderboard(qid: str, user=Depends(get_current_user)):
+    rows = await db.quiz_attempts.find({"quiz_id": qid}, {"_id": 0}).to_list(1000)
+    rows.sort(key=lambda a: (-a.get("percent", 0), a.get("submitted_at", "")))
+    return rows[:20]
 
 # ---------------- KELAS (Class & Subjects Management) ----------------
 class KelasIn(BaseModel):
@@ -758,10 +774,15 @@ class AnnouncementIn(BaseModel):
     title: str
     content: str
     scope: str = "sekolah"  # sekolah | osis | kelas
+    kelas: Optional[str] = None
 
 @api.get("/announcements")
-async def list_ann(user=Depends(get_current_user)):
-    return await db.announcements.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+async def list_ann(kelas: Optional[str] = None, user=Depends(get_current_user)):
+    if kelas:
+        q = {"$or": [{"kelas": kelas}, {"kelas": None}, {"kelas": ""}]}
+    else:
+        q = {}
+    return await db.announcements.find(q, {"_id": 0}).sort("created_at", -1).to_list(200)
 
 @api.post("/announcements")
 async def add_ann(body: AnnouncementIn, user=Depends(get_current_user)):
@@ -770,9 +791,12 @@ async def add_ann(body: AnnouncementIn, user=Depends(get_current_user)):
     doc = {"id": str(uuid.uuid4()), **body.model_dump(), "author": user["name"],
            "role": user["role"], "created_at": now_iso()}
     await db.announcements.insert_one(doc); doc.pop("_id", None)
-    # notify students
-    student_ids = [u["id"] for u in await db.users.find({"role": "siswa"}, {"id": 1}).to_list(2000)]
-    await notify(student_ids, f"📢 {body.title}", body.content[:120], "/announcements")
+    # notify students (kelas-scoped jika ada)
+    if body.kelas:
+        student_ids = [u["id"] for u in await db.users.find({"role": {"$in": STUDENT_ROLES}, "kelas": body.kelas}, {"id": 1}).to_list(500)]
+    else:
+        student_ids = [u["id"] for u in await db.users.find({"role": {"$in": STUDENT_ROLES}}, {"id": 1}).to_list(2000)]
+    await notify(student_ids, f"📢 {body.title}", body.content[:120], body.kelas and f"/kelas" or "/announcements")
     return doc
 
 # ---------------- UANG KAS ----------------
@@ -786,7 +810,7 @@ class KasIn(BaseModel):
 async def list_kas(kelas: Optional[str] = None, user=Depends(get_current_user)):
     q = {}
     if kelas: q["kelas"] = kelas
-    elif user["role"] == "siswa" and user.get("kelas"): q["kelas"] = user["kelas"]
+    elif user["role"] in STUDENT_ROLES and user.get("kelas"): q["kelas"] = user["kelas"]
     return await db.uang_kas.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
 
 @api.post("/kas")
